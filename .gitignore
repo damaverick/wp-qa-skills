@@ -10,3 +10,6 @@ readme.html
 license.txt
 xmlrpc.php
 local-xdebuginfo.php
+__pycache__/
+.htaccess
+wp-config-sample.php

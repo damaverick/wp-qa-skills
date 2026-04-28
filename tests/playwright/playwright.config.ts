@@ -9,6 +9,6 @@ export default defineConfig({
   use: {
     headless: true,
     ignoreHTTPSErrors: true,
-    baseURL: 'https://capral-2026.local',
+    baseURL: process.env.SITE_BASE || 'https://mysite.local',
   },
 });

@@ -599,8 +599,8 @@ class Bulk_User_Export {
                 $elapsed = round((microtime(true) - $start_time) * 1000);
                 error_log('[EXPORT] COUNT result: ' . $total_users . ' (took ' . $elapsed . 'ms)');
                 
-                if ($total_users === 0 || $total_users === null) {
-                    error_log('No users found with current filters');
+                if (empty($total_users)) {
+                    error_log('[EXPORT] No users found with current filters. Role: ' . $role . ', State: ' . $state . ', Status: ' . $status . ', Date from: ' . $date_from . ', Date to: ' . $date_to);
                     $this->cleanup_export();
                     wp_send_json_success(array(
                         'no_users' => true,

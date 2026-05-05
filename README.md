@@ -1,12 +1,48 @@
 # WP QA Skills
 
-Claude Code skills for WordPress quality assurance — automated site auditing, bug fixing, and code review.
+Claude Code skills for WordPress QA. Drop into any project's `skills/` folder — Claude auto-discovers them. Each skill is a pipeline; you approve at key gates.
 
-## What this is
+> **These run in Claude Code CLI**, not in GitHub. See [GitHub limitations](#github-limitations).
 
-A set of reusable [Claude Code](https://claude.ai/claude-code) skills. Drop them into any WordPress project's `skills/` directory and Claude auto-discovers them. Each skill is a prompt + config — Claude runs the pipeline, you approve at key gates.
+## Skills
 
-## Prerequisites
+| Skill | Invoke | What it does |
+|-------|--------|--------------|
+| `site-audit` | `/site-audit` | Crawl site, score pages RED/AMBER/GREEN (PHP errors, JS errors, slow SQL queries) — auto-fix worst offenders, open PR |
+| `fix-bugherd` | `/fix-bugherd BH-123` or `/fix-bugherd <description>` | Fix bugs end-to-end — BugHerd ticket or plain text, no ticket needed |
+| `review-fix` | Auto-called | 8 parallel reviewers, auto-fix loop |
+| `review-team` | `/review-team <PR>` | Adversarial PR review with Devil's Advocate |
+| `develop-team` | Auto-called | Multi-agent implementation for complex fixes |
+
+`review-fix` and `develop-team` are called automatically by the two main skills — no need to invoke them directly.
+
+## Quick start
+
+See [SETUP.md](SETUP.md) for step-by-step team onboarding.
+
+```bash
+# 1. Clone and copy skills into your project
+git clone https://github.com/damaverick/wp-qa-skills.git /tmp/wp-qa-skills
+cp -r /tmp/wp-qa-skills/skills your-project/skills
+
+# 2. For site-audit: copy QM mu-plugin and Playwright tests
+cp /tmp/wp-qa-skills/skills/site-audit/mu-plugins/qm-perf-capture.php \
+   your-project/wp-content/mu-plugins/
+cp -r /tmp/wp-qa-skills/tests your-project/tests
+
+# 3. Fill in config
+vim your-project/skills/site-audit/CONFIG.md
+vim your-project/skills/fix-bugherd/CONFIG.md   # optional — plain text mode works without BugHerd key
+
+# 4. Open Claude Code in your project and run
+/site-audit
+/fix-bugherd BH-123
+/fix-bugherd the mobile nav is broken on iOS Safari
+```
+
+Commit `skills/` to git — whole team gets them automatically.
+
+## Requirements
 
 ### All skills
 
@@ -15,28 +51,29 @@ A set of reusable [Claude Code](https://claude.ai/claude-code) skills. Drop them
 | **Claude Code** | `npm install -g @anthropic-ai/claude-code` |
 | **`gh` CLI** | `brew install gh` then `gh auth login` |
 
-### site-audit skill
+### site-audit only
 
 | Tool | Install |
 |------|---------|
-| **Python 3** | Already on macOS/Linux. Check: `python3 --version` |
-| **Query Monitor plugin** | Install the [Query Monitor](https://wordpress.org/plugins/query-monitor/) WordPress plugin |
-| **QM mu-plugin** | Copy `skills/site-audit/mu-plugins/qm-perf-capture.php` to `wp-content/mu-plugins/` |
-| **Node.js + Playwright** | `cd tests/playwright && npm install && npx playwright install chromium` |
+| **Python 3** | Pre-installed on macOS/Linux. Check: `python3 --version` |
+| **Query Monitor plugin** | WordPress admin > Plugins > Add New > "Query Monitor" |
+| **QM mu-plugin** | `cp skills/site-audit/mu-plugins/qm-perf-capture.php wp-content/mu-plugins/` |
+| **Playwright** | `cd tests/playwright && npm install && npx playwright install chromium` |
+| **WP_DEBUG_LOG** | `wp config set WP_DEBUG_LOG true --raw` |
 
-### fix-bugherd skill
+### fix-bugherd only
 
-| Tool | Install |
-|------|---------|
-| **BugHerd API key** | Get from BugHerd > Settings > API Keys. Add to `skills/fix-bugherd/CONFIG.md` |
+| Tool | Notes |
+|------|-------|
+| **BugHerd API key** | Optional. BugHerd > Settings > API Keys — add to `skills/fix-bugherd/CONFIG.md`. Without it, plain text mode still works. |
 
 ## How site-audit works (the data pipeline)
 
-The audit needs data to score pages. Here's the flow:
+The audit needs per-page performance data. Here's the flow:
 
 ```
 1. QUERY MONITOR PLUGIN
-   Active on your WordPress site. Normally shows debug panels in the admin bar.
+   Active on your WordPress site.
    The mu-plugin adds a JSON output mode — writes per-page profiles as .json files.
 
 2. MU-PLUGIN (qm-perf-capture.php)
@@ -44,133 +81,97 @@ The audit needs data to score pages. Here's the flow:
      - All DB queries (count, duplicates, slow queries, pattern histogram)
      - PHP errors and warnings collected during the request
      - Memory usage, page generation time
-   Output goes to: wp-content/qm-output/<timestamp>_<hash>.json
+   Output: wp-content/qm-output/<timestamp>_<hash>.json
 
 3. PLAYWRIGHT CRAWL
-   Visits every front-end URL from wp-sitemap.xml (up to your max_urls cap).
-   Sets the qm_auth cookie on every request — triggers the mu-plugin.
-   Also captures JS console errors (uncaught exceptions + console.error calls).
+   Visits every front-end URL (up to your max_urls cap).
+   Sets the qm_auth cookie — triggers the mu-plugin.
+   Also captures JS console errors.
    Output: one QM JSON file per URL + js-errors.json
 
 4. audit.py AGGREGATOR
-   Reads all QM JSON files + PHP debug.log + PHP error log + access log.
-   Scores every URL RED/AMBER/GREEN against your thresholds.
-   Output: audit-summary.json (~5K tokens — Claude reads this, not the raw logs)
+   Reads all QM JSON files + PHP debug.log + PHP error log.
+   Scores every URL RED/AMBER/GREEN against thresholds in CONFIG.md.
+   Output: audit-summary.json (~5K tokens — Claude reads this, not raw logs)
 
 5. CLAUDE FIX LOOP
-   Reads the summary. For each RED URL, researches root cause, edits code,
-   commits per root cause, re-audits to verify. Stops when zero REDs or cap hit.
+   For each RED URL: research root cause → edit code → commit → re-audit.
+   Stops when zero REDs or iteration cap hit.
 ```
 
-## Log files — what goes where
+## Log files
 
-The aggregator (`audit.py`) reads from these sources. All are optional — it uses whatever exists.
-
-| Log file | Generated by | How to enable | What it contains |
-|----------|-------------|---------------|-----------------|
-| `wp-content/qm-output/*.json` | QM mu-plugin | Playwright must visit the pages | Per-page DB queries, timings, memory, PHP errors |
-| `wp-content/qm-output/js-errors.json` | Playwright crawl | Auto-generated during crawl | JS console errors per URL |
-| `wp-content/debug.log` | WordPress | `define('WP_DEBUG_LOG', true)` in wp-config.php | PHP errors, warnings, notices |
+| File | Generated by | How to enable | Contains |
+|------|-------------|---------------|----------|
+| `wp-content/qm-output/*.json` | QM mu-plugin | Playwright crawl must run | DB queries, timings, memory, PHP errors per URL |
+| `wp-content/qm-output/js-errors.json` | Playwright crawl | Auto during crawl | JS console errors per URL |
+| `wp-content/debug.log` | WordPress | `WP_DEBUG_LOG=true` in wp-config.php | PHP errors, warnings, notices |
 | `logs/php-error.log` | Server | Auto on Local by Flywheel | PHP error log |
-| `logs/access.log` | Server | Auto on Local by Flywheel | HTTP access log (optional context) |
+| `logs/access.log` | Server | Auto on Local by Flywheel | HTTP access log |
 
-**Key point:** The QM JSON files are the primary data source. Without them, you get PHP/JS errors but no query counts, slow queries, or memory stats. The Playwright crawl generates them — it visits pages so the mu-plugin fires.
-
-## Install
-
-```bash
-git clone https://github.com/damaverick/wp-qa-skills.git /tmp/wp-qa-skills
-
-# Pick the skills you need:
-cp -r /tmp/wp-qa-skills/skills/site-audit   your-project/skills/site-audit
-cp -r /tmp/wp-qa-skills/skills/fix-bugherd  your-project/skills/fix-bugherd
-cp -r /tmp/wp-qa-skills/skills/review-fix   your-project/skills/review-fix
-cp -r /tmp/wp-qa-skills/skills/review-team  your-project/skills/review-team
-cp -r /tmp/wp-qa-skills/skills/develop-team your-project/skills/develop-team
-
-# For site-audit, also install the QM mu-plugin:
-cp /tmp/wp-qa-skills/skills/site-audit/mu-plugins/qm-perf-capture.php \
-   your-project/wp-content/mu-plugins/
-
-# And copy the Playwright crawl test:
-cp -r /tmp/wp-qa-skills/tests               your-project/tests
-```
+QM JSON files are the primary data source. Without them you get PHP/JS errors but no query counts or slow query data.
 
 ## Where skills live
 
-- `skills/` at your **project root** — Claude auto-discovers them. Standard for shared, committable skills. ✅
-- `.claude/skills/` at project root — also works, but meant for personal skills.
-- `~/.claude/skills/` — global across all projects. Not recommended for team use.
+- `skills/` at project root — auto-discovered by Claude. Commit to git for team sharing. ✅
+- `.claude/skills/` — also works, for personal/local skills only
+- `~/.claude/skills/` — global across all projects, not for team use
 
-Put them in `skills/`, commit to git, your whole team gets them.
+## Team review workflow
 
-## Skills
+The typical workflow for using these skills with GitHub PRs:
 
-| Skill | What it does | How to invoke |
-|-------|-------------|---------------|
-| `site-audit` | Crawl site, score pages RED/AMBER/GREEN, auto-fix, open PR | `/site-audit` |
-| `fix-bugherd` | Fix bugs from BugHerd ticket or plain text description | `/fix-bugherd BH-123` |
-| `review-fix` | 8 parallel reviewers, auto-fix quick items | Called by above |
-| `review-team` | Team-based review with gate enforcement | Called by above |
-| `develop-team` | Multi-agent dev for complex fixes | Called by fix-bugherd |
-
-## Quick start
-
-### Run a site audit
-
-```bash
-# 1. Install Query Monitor plugin (WordPress admin)
-# 2. Copy the mu-plugin
-cp skills/site-audit/mu-plugins/qm-perf-capture.php wp-content/mu-plugins/
-
-# 3. Enable debug log
-wp config set WP_DEBUG_LOG true --raw
-
-# 4. Edit thresholds for your site
-vim skills/site-audit/CONFIG.md
-
-# 5. Run the audit
-/site-audit
-
-# Claude: crawls site → scores pages → shows REDs → you confirm → fixes → opens PR
+```
+Dev pushes branch → creates PR on GitHub
+                              ↓
+Tech lead runs locally:  /review-team 123
+                         (fetches PR diff from GitHub, runs analysis locally)
+                              ↓
+Posts findings as PR comment on GitHub
 ```
 
-### Fix a BugHerd task
+`review-team` needs a PR number — the number GitHub assigns automatically when a PR is created. Find it in the URL (`github.com/org/repo/pull/123`) or in the PR list.
+
+**Simpler day-to-day workflow** — run `review-fix` before every push, no PR number needed:
 
 ```bash
-# 1. Set your BugHerd API key
-vim skills/fix-bugherd/CONFIG.md
-
-# 2. Fix a task
-/fix-bugherd BH-123
+# Before pushing your branch:
+/review-fix          # reviews your local diff, auto-fixes issues, commits
+git push
 ```
 
-### Fix a bug without a ticket
+## GitHub limitations
 
-```bash
-/fix-bugherd the mobile nav hamburger menu doesn't open on iOS Safari
-```
+These are **Claude Code CLI skills** — they run in your terminal, not in GitHub issues or PRs.
 
-## How the skills work
+| Skill | Runs | Notes |
+|-------|------|-------|
+| `/site-audit` | Local only | Needs live WP site + QM plugin |
+| `/fix-bugherd` | Local only | Needs WP codebase access |
+| `/review-fix` | Local only | Run before pushing |
+| `/review-team` | Local, reviews GitHub PRs | Fetches PR diff via `gh` CLI, analysis runs on your machine |
+| `@claude` in PR comments | GitHub only | Basic tasks only — does not run these skill pipelines |
 
-1. You type `/fix-bugherd BH-123` in Claude Code
-2. Claude loads `skills/fix-bugherd/SKILL.md` — the orchestration plan
-3. Claude loads `skills/fix-bugherd/CONFIG.md` — your settings
-4. Claude runs through phases: read bug → research → fix → review → commit → push
-5. You approve at key gates (before push, after research)
-6. PR opened, BugHerd updated
+The [`anthropic/claude-code-action`](https://github.com/anthropic/claude-code-action) GitHub Action lets you tag `@claude` in PR comments for simple one-shot tasks ("fix this typo", "explain this function"), but it cannot run multi-agent pipelines like review-team or site-audit.
 
-No setup beyond copying files and filling in CONFIG.md.
+## Conventions
+
+- Branches: `fix/YYYY-MM-DD-{slug}` or `audit/YYYY-MM-DD-{summary}`
+- Commits: `fix:` prefix with a fix table in the body
+- PRs: fix table + review checklist
 
 ## Customise
 
-Each skill has its own `CONFIG.md`. Edit before first use:
+Each skill has a `CONFIG.md`. Edit before first use:
 
-- `skills/site-audit/CONFIG.md` — site URL, thresholds, URL scope, log paths
-- `skills/fix-bugherd/CONFIG.md` — BugHerd API key, project IDs, team members
+- `skills/site-audit/CONFIG.md` — site URL, thresholds (query count, TTFB, slow query time, memory), URL scope, log paths, QM cookie value
+- `skills/fix-bugherd/CONFIG.md` — BugHerd API key, project IDs, team member IDs
 
-Thresholds can also be overridden via JSON:
+Override thresholds on the command line:
 
 ```bash
-python3 skills/site-audit/audit.py --thresholds my-thresholds.json
+/site-audit max-urls=50
+/site-audit auto-fix=false       # analyse only, no fixes
+/site-audit skip-crawl=true      # use cached QM data
+/fix-bugherd BH-123 branch=main skip-review=true
 ```

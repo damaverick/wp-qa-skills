@@ -1,21 +1,17 @@
 # wp-qa-skills
 
-Repository of reusable Claude Code skills for WordPress QA: automated site auditing, bug fixing, and code review.
+Claude Code skills for WordPress QA: site auditing, bug fixing, and code review.
 
-## Skills in this repo
+## Skills
 
-- `skills/site-audit/` — Autonomous site audit pipeline (crawl, score, fix, PR)
-- `skills/fix-bugherd/` — Dual-mode bug fixing (BugHerd API + plain text)
-- `skills/review-fix/` — 8 parallel reviewers with auto-fix
-- `skills/review-team/` — Team-based code review
-- `skills/develop-team/` — Multi-agent complex development
-
-## To use
-
-Copy the skill(s) you want into your project's `skills/` directory. Each skill has its own `CONFIG.md` — fill in before first run.
+- `skills/site-audit/` — Crawl site, score RED/AMBER/GREEN (PHP errors, JS errors, slow SQL), auto-fix, PR
+- `skills/fix-bugherd/` — Fix bugs from BugHerd ticket or plain text description
+- `skills/review-fix/` — 8 parallel reviewers with auto-fix loop (called automatically)
+- `skills/review-team/` — Adversarial PR review with Devil's Advocate
+- `skills/develop-team/` — Multi-agent implementation for complex fixes (called automatically)
 
 ## Conventions
 
-- Branch naming: `fix/{YYYY-MM-DD}-{slug}`, `audit/{YYYY-MM-DD}-{summary}`
-- Commit messages: `fix:` prefix with fix table in body
-- PR format: fix table + review checklist
+- Branches: `fix/{YYYY-MM-DD}-{slug}`, `audit/{YYYY-MM-DD}-{summary}`
+- Commits: `fix:` prefix with fix table in body
+- PRs: fix table + review checklist

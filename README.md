@@ -154,6 +154,29 @@ These are **Claude Code CLI skills** — they run in your terminal, not in GitHu
 
 The [`anthropic/claude-code-action`](https://github.com/anthropic/claude-code-action) GitHub Action lets you tag `@claude` in PR comments for simple one-shot tasks ("fix this typo", "explain this function"), but it cannot run multi-agent pipelines like review-team or site-audit.
 
+## Companion skills & plugins
+
+These are not in this repo but work alongside it — Claude picks them up automatically from global scope when installed. Team members without them will still get the full audit/fix pipeline, just without the extra WP-specific context.
+
+### WordPress agent skills
+
+Helps Claude understand WP coding patterns, hooks, WP-CLI, block development, REST API, and more. Used automatically when `fix-bugherd` or `site-audit` touches WordPress code.
+
+```bash
+git clone https://github.com/WordPress/agent-skills.git /tmp/wp-agent-skills
+cp -r /tmp/wp-agent-skills/skills/* ~/.claude/skills/
+```
+
+### Superpowers plugin
+
+Improves Claude's reasoning during every phase — systematic debugging, verification before committing, parallel agent dispatch, and more.
+
+```bash
+claude plugins install superpowers
+```
+
+Both install globally — available in every project automatically, no per-project setup needed.
+
 ## Conventions
 
 - Branches: `fix/YYYY-MM-DD-{slug}` or `audit/YYYY-MM-DD-{summary}`

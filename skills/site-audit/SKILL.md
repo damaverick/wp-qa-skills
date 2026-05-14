@@ -28,17 +28,93 @@ Pre-launch site audit pipeline: aggregate all log sources into a token-efficient
 | `skip-review` | `false` | Skip review phase |
 | `auto-fix` | `true` | Auto-fix REDs in autonomous loop |
 | `branch` | `ask` | Branch strategy: `ask`, `new`, `main` |
+| `stop-after` | `6` | Stop after this phase number and write handover doc (1–6) |
+| `resume` | `false` | Resume from `audit-handover.md` — skip completed phases |
 
 ## Invocation
 
 ```
-/site-audit                        # full audit with CONFIG.md settings
-/site-audit max-urls=50           # override URL cap from config
-/site-audit skip-crawl=true       # use cached QM data only
-/site-audit skip-review=true      # skip review phase
-/site-audit auto-fix=false        # analyse only, no fixes
-/site-audit urls=file:urls.txt    # custom URL list
+/site-audit                          # full audit with CONFIG.md settings
+/site-audit max-urls=50             # override URL cap from config
+/site-audit skip-crawl=true         # use cached QM data only
+/site-audit skip-review=true        # skip review phase
+/site-audit auto-fix=false          # analyse only, no fixes
+/site-audit urls=file:urls.txt      # custom URL list
+/site-audit stop-after=2            # run phases 0-2 then write handover, stop
+/site-audit stop-after=3            # run through analysis then stop
+/site-audit resume=true             # read audit-handover.md and continue from next phase
 ```
+
+## Batch / Multi-Session Workflow
+
+For large sites or context-limited sessions, run phases in separate sessions:
+
+**Session 1 — crawl only:**
+```
+/site-audit stop-after=2
+```
+Runs setup → log aggregation → Playwright crawl. Writes `audit-handover.md`. Stop.
+
+**Session 2 — analyse + plan fixes:**
+```
+/site-audit resume=true stop-after=3
+```
+Reads handover, runs analysis, presents RED/AMBER/GREEN table. Stop before fixing.
+
+**Session 3 — fix loop:**
+```
+/site-audit resume=true auto-fix=true stop-after=4
+```
+Runs fix loop only. Writes updated handover. Stop before review.
+
+**Session 4 — review + ship:**
+```
+/site-audit resume=true stop-after=6
+```
+Runs review and creates PR.
+
+### Handover Doc Format
+
+Written to `audit-handover.md` in WP root after each `stop-after` phase.
+**Always overwrite — only one handover doc exists at a time.**
+
+```markdown
+# Audit Handover — {YYYY-MM-DD}
+
+## Last completed phase: {N} — {Phase Name}
+
+## Site
+- Base URL: {base_url}
+- Branch: {branch name or 'none'}
+- URLs crawled: {N}
+
+## Key Findings
+- RED pages: {N} — {worst URL(s)}
+- AMBER pages: {N}
+- GREEN pages: {N}
+- Top errors: {1–3 line summary}
+
+## Data Files
+- `audit-summary.json` — full aggregated results
+- `wp-content/qm-output/js-errors.json` — JS error crawl output
+
+## Resume Command
+\`\`\`
+/site-audit resume=true stop-after={next phase}
+\`\`\`
+
+## Notes
+{anything the next session needs to know — decisions made, skipped items, caveats}
+```
+
+### Resume Behaviour
+
+When `resume=true`:
+1. Read `audit-handover.md`
+2. Announce: "Resuming from phase {N+1}. Last run: {date}. {Key finding summary}."
+3. Skip all phases ≤ last completed phase
+4. Continue from next phase using existing `audit-summary.json` and `js-errors.json`
+5. Do NOT re-run the crawl unless `skip-crawl=false` is explicitly passed
 
 ## Architecture
 
@@ -57,9 +133,14 @@ ORCHESTRATOR (main session)
 |   Output: audit-summary.json — deduplicated, ranked by severity
 |
 +-- Phase 2: PLAYWRIGHT CRAWL (token-free — Playwright CLI)
-|   Run Playwright crawl: uses QM auth cookie
-|   Captures JS console errors per URL
-|   Writes wp-content/qm-output/js-errors.json
+|   Run Playwright crawl: uses QM auth cookie + optional HTTP basic auth
+|   Captures per URL:
+|     - JS runtime exceptions (uncaught errors)
+|     - console.error messages (CORS warnings, deprecations)
+|     - Failed network requests (CORS blocks, 404s, timeouts)
+|     - HTTP error responses (4xx, 5xx on sub-resources)
+|   Categorizes each issue: cors | runtime | network | security | deprecation
+|   Writes wp-content/qm-output/js-errors.json (full results with categories)
 |   Re-run audit.py to merge JS errors into audit-summary.json
 |
 +-- Phase 3: ANALYSIS
@@ -146,9 +227,22 @@ Run the Playwright crawl:
 cd tests/playwright && npx playwright test src/crawl.spec.ts --reporter=list
 ```
 
-This visits all URLs with QM auth cookie, captures:
-- QM JSON profiles per URL (written by mu-plugin)
-- JS console errors per URL (written to `js-errors.json`)
+For staging environments with HTTP basic auth:
+```bash
+HTTP_USER=username HTTP_PASS=password SITE_BASE=https://staging.example.com \
+  npx playwright test src/crawl.spec.ts --reporter=list
+```
+
+This visits all URLs with QM auth cookie and captures **per URL**:
+- QM JSON profiles (written by mu-plugin)
+- JS runtime exceptions (uncaught errors via `pageerror` event)
+- Console errors (CORS warnings, deprecations via `console.error`)
+- Failed network requests (CORS blocks, timeouts via `requestfailed` event)
+- HTTP error responses on sub-resources (4xx/5xx via `response` event)
+
+Each issue is categorized as: `cors` | `runtime` | `network` | `security` | `deprecation`
+
+Output: `wp-content/qm-output/js-errors.json` — full results with per-URL breakdown and category counts.
 
 After crawl completes, re-run audit.py:
 

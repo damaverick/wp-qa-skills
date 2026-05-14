@@ -4,6 +4,21 @@
 
 Visits front-end URLs from `wp-sitemap.xml`, collecting QM JSON profiles and JS errors. Simulates human interaction (mouse movement, scroll) to catch interaction-triggered errors. Categorizes each issue automatically.
 
+## Multi-Session Workflow (save context)
+
+Run phases in separate sessions. Each session writes `audit-handover.md` so the next picks up where it left off.
+
+| Session | Command | What runs |
+|---------|---------|-----------|
+| 1 | `/site-audit stop-after=2` | Setup + log aggregation + Playwright crawl |
+| 2 | `/site-audit resume=true stop-after=3` | Analysis only — RED/AMBER/GREEN table |
+| 3 | `/site-audit resume=true stop-after=4` | Fix loop |
+| 4 | `/site-audit resume=true` | Review + PR |
+
+`audit-handover.md` is written to WP root after each stop. New session reads it automatically on `resume=true`.
+
+---
+
 ## Prerequisites
 
 ```bash

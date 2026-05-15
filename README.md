@@ -4,11 +4,23 @@ Claude Code skills for WordPress QA. Drop into any project's `skills/` folder �
 
 > **These run in Claude Code CLI**, not in GitHub. See [GitHub limitations](#github-limitations).
 
+## What it audits
+
+| Signal | Source | Captured by |
+|--------|--------|-------------|
+| PHP errors and warnings | `wp-content/debug.log` | WordPress `WP_DEBUG_LOG` |
+| MySQL slow queries and duplicates | per-page query profiles | Query Monitor plugin + mu-plugin |
+| JavaScript console errors | browser runtime | Playwright crawl |
+| Page load time and TTFB | HTTP timing | Playwright crawl |
+| Memory usage per page | PHP runtime | Query Monitor mu-plugin |
+
+**How it works:** Playwright visits every page as a logged-in user, triggering the QM mu-plugin to write a JSON profile per URL (DB queries, timings, memory, PHP errors). A Python script aggregates all profiles into `audit-summary.json`, scores every URL RED/AMBER/GREEN, and Claude fixes the worst offenders.
+
 ## Skills
 
 | Skill | Invoke | What it does |
 |-------|--------|--------------|
-| `site-audit` | `/site-audit` | Crawl site, score pages RED/AMBER/GREEN (PHP errors, JS errors, slow SQL queries) — auto-fix worst offenders, open PR |
+| `site-audit` | `/site-audit` | Crawl site, score pages RED/AMBER/GREEN — auto-fix worst offenders, open PR |
 | `fix-bugherd` | `/fix-bugherd BH-123` or `/fix-bugherd <description>` | Fix bugs end-to-end — BugHerd ticket or plain text, no ticket needed |
 | `review-fix` | Auto-called | 8 parallel reviewers, auto-fix loop |
 | `review-team` | `/review-team <PR>` | Adversarial PR review with Devil's Advocate |
@@ -16,31 +28,55 @@ Claude Code skills for WordPress QA. Drop into any project's `skills/` folder �
 
 `review-fix` and `develop-team` are called automatically by the two main skills — no need to invoke them directly.
 
-## Quick start
+## Setup
 
-See [SETUP.md](SETUP.md) for step-by-step team onboarding.
+Open your WordPress project root in a terminal, then run:
 
 ```bash
-# 1. Clone and copy skills into your project
-git clone https://github.com/damaverick/wp-qa-skills.git /tmp/wp-qa-skills
-cp -r /tmp/wp-qa-skills/skills your-project/skills
-
-# 2. For site-audit: copy QM mu-plugin and Playwright tests
-cp /tmp/wp-qa-skills/skills/site-audit/mu-plugins/qm-perf-capture.php \
-   your-project/wp-content/mu-plugins/
-cp -r /tmp/wp-qa-skills/tests your-project/tests
-
-# 3. Fill in config
-vim your-project/skills/site-audit/CONFIG.md
-vim your-project/skills/fix-bugherd/CONFIG.md   # optional — plain text mode works without BugHerd key
-
-# 4. Open Claude Code in your project and run
-/site-audit
-/fix-bugherd BH-123
-/fix-bugherd the mobile nav is broken on iOS Safari
+bash <(curl -s https://raw.githubusercontent.com/damaverick/wp-qa-skills/main/install.sh)
 ```
 
-Commit `skills/` to git — whole team gets them automatically.
+This copies `skills/`, `tests/`, and the QM mu-plugin into your project in one step.
+
+Then:
+
+```bash
+# 1. Set your site URL, QM cookie value, and URL cap
+vim skills/site-audit/CONFIG.md
+
+# 2. BugHerd API key (optional — plain text mode works without it)
+vim skills/fix-bugherd/CONFIG.md
+
+# 3. Install Playwright dependencies
+cd tests/playwright && npm install && npx playwright install chromium
+```
+
+Finally, install the **Query Monitor** plugin in WordPress admin and enable debug logging:
+
+```bash
+wp config set WP_DEBUG_LOG true --raw
+wp config set WP_DEBUG true --raw
+```
+
+Commit `skills/` to git — whole team gets them automatically. See [SETUP.md](SETUP.md) for a full walkthrough.
+
+## Commands
+
+```bash
+/site-audit                        # full audit with CONFIG.md settings
+/site-audit max-urls=50            # override URL cap
+/site-audit skip-crawl=true        # use cached QM data, skip Playwright
+/site-audit auto-fix=false         # analyse only, no fixes
+/site-audit skip-review=true       # fix without the 8-agent review
+
+/fix-bugherd BH-123                # fix a BugHerd task
+/fix-bugherd BH-123 branch=new     # fix on a new branch
+/fix-bugherd mobile nav broken on iOS Safari   # plain text — no ticket needed
+/fix-bugherd the contact form emails are blank since the last update
+
+/review-team 123                   # adversarial review of PR #123
+/review-fix                        # review your local diff before pushing
+```
 
 ## Requirements
 

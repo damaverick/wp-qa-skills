@@ -30,35 +30,58 @@ Claude Code skills for WordPress QA. Drop into any project's `skills/` folder �
 
 ## Setup
 
-Open your WordPress project root in a terminal, then run:
+**From your WordPress project root** (the folder that contains `wp-content/`):
 
 ```bash
 bash <(curl -s https://raw.githubusercontent.com/damaverick/wp-qa-skills/main/install.sh)
 ```
 
-This copies `skills/`, `tests/`, and the QM mu-plugin into your project in one step.
+The installer copies files then immediately launches an interactive setup wizard. The wizard:
 
-Then:
+- Asks your site URL, max URLs to crawl, and fix loop settings → writes `CONFIG.md` automatically
+- Installs the QM mu-plugin and creates `wp-content/qm-output/` (required before Playwright runs)
+- Installs Playwright dependencies (`npm install + playwright install chromium`)
+- Checks `WP_DEBUG` / `WP_DEBUG_LOG` in `wp-config.php` and warns if missing
+- Configures git remote
+- Optionally adds BugHerd API key
+
+The wizard handles everything. **You do not need to manually edit any config files.**
+
+### After setup — install Query Monitor plugin
+
+The QM plugin must be active in WordPress before you run an audit:
 
 ```bash
-# 1. Set your site URL, QM cookie value, and URL cap
-vim skills/site-audit/CONFIG.md
+# Via WP-CLI (fastest):
+wp plugin install query-monitor --activate
 
-# 2. BugHerd API key (optional — plain text mode works without it)
-vim skills/fix-bugherd/CONFIG.md
-
-# 3. Install Playwright dependencies
-cd tests/playwright && npm install && npx playwright install chromium
+# Or: WordPress Admin > Plugins > Add New > search "Query Monitor" > Install > Activate
 ```
 
-Finally, install the **Query Monitor** plugin in WordPress admin and enable debug logging:
+Also enable debug logging if not already set:
 
 ```bash
-wp config set WP_DEBUG_LOG true --raw
 wp config set WP_DEBUG true --raw
+wp config set WP_DEBUG_LOG true --raw
 ```
 
-Commit `skills/` to git — whole team gets them automatically. See [SETUP.md](SETUP.md) for a full walkthrough.
+### Verify everything is ready
+
+```bash
+python3 scripts/preflight.py
+```
+
+This checks all prerequisites and prints `[OK]` / `[WARN]` / `[FAIL]` for each one. Fix any `[FAIL]` items before running `/site-audit`.
+
+### Skip the wizard (CI / automation)
+
+```bash
+bash <(curl -s .../install.sh) --no-setup
+# Then configure manually:
+python3 setup.py
+```
+
+Commit `skills/` to git — the whole team gets them automatically.
 
 ## Commands
 

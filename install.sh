@@ -29,10 +29,17 @@ echo "Installing QM mu-plugin..."
 mkdir -p wp-content/mu-plugins
 cp "$TMP/skills/site-audit/mu-plugins/qm-perf-capture.php" wp-content/mu-plugins/
 
-echo ""
-echo "Done. Next steps:"
-echo "  1. Edit .claude/skills/site-audit/CONFIG.md  — set site URL, QM cookie, max_urls"
-echo "  2. Edit .claude/skills/fix-bugherd/CONFIG.md — add BugHerd API key (optional)"
-echo "  3. cd tests/playwright && npm install && npx playwright install chromium"
-echo "  4. Install Query Monitor plugin in WordPress admin"
-echo "  5. Restart Claude Code, then run /site-audit"
+echo "Copying setup wizard and scripts..."
+cp "$TMP/setup.py" .
+mkdir -p scripts
+cp -r "$TMP/scripts/"* scripts/ 2>/dev/null || true
+
+# Run interactive setup (unless --no-setup)
+if [[ "${1:-}" != "--no-setup" ]]; then
+  echo ""
+  echo "Starting interactive setup..."
+  python3 setup.py
+else
+  echo ""
+  echo "Skipped interactive setup. Run manually: python3 setup.py"
+fi

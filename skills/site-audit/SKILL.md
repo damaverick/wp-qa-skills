@@ -195,6 +195,17 @@ ORCHESTRATOR (main session)
    ```
    If dirty: warn user, offer to `git stash` before creating branch. Do NOT create branch with uncommitted changes.
 
+7. **Pre-edit safety push** — Before any code changes:
+   - Check unpushed commits: `git log @{u}.. --oneline 2>/dev/null | wc -l`
+   - If unpushed commits exist AND remote is configured:
+     ```
+     You have {N} unpushed commits. Push to remote before I start editing?
+     1. Yes — push now (recommended backup)
+     2. No — continue without pushing
+     ```
+   - If yes: `git push -u origin $(git branch --show-current)`
+   - Skip if: no remote, no commits, or already up to date
+
 ### Phase 1: Aggregate Logs
 
 Run the Python aggregator:

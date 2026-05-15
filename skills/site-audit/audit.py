@@ -7,6 +7,7 @@ Usage: python3 skills/site-audit/audit.py [--base /path/to/wp-root] [--threshold
 """
 
 import re
+import csv
 import json
 import glob
 import argparse
@@ -111,6 +112,70 @@ def parse_js_errors(filepath: str) -> list[dict]:
         return data  # [{url, errors: [{message, type}]}]
     except (json.JSONDecodeError, IOError):
         return []
+
+
+def parse_php_error_csv(filepath: str) -> list[dict]:
+    """Parse wp-content/logs/php-error-logs.csv (columns: Message, Time)."""
+    pattern = re.compile(
+        r'PHP (Fatal error|Warning|Notice|Parse error|Deprecated):\s+(.*?)(?:\s+in\s+([^(]+?)(?:\s+on\s+line\s+(\d+))?)?$'
+    )
+    errors = []
+    try:
+        with open(filepath, 'r', errors='ignore', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                msg = row.get('Message', '').strip()
+                m = pattern.search(msg)
+                if m:
+                    err_type = m.group(1).strip()
+                    body = m.group(2).strip()
+                    fname = m.group(3).strip() if m.group(3) else ''
+                    line = int(m.group(4)) if m.group(4) else 0
+                    errors.append({
+                        'type': f'PHP_{err_type.upper().replace(" ", "_")}',
+                        'message': f'{err_type}: {body}',
+                        'file': fname,
+                        'line': line,
+                    })
+                elif msg:
+                    errors.append({
+                        'type': 'PHP_ERROR',
+                        'message': msg[:200],
+                        'file': '',
+                        'line': 0,
+                    })
+    except (IOError, OSError):
+        pass
+    return errors
+
+
+def parse_access_csv(filepath: str) -> dict:
+    """
+    Parse wp-content/logs/access-logs.csv.
+    Columns: Log Type, IP Address, Status, Time, Resource, User Agent, Domain
+    Returns dict with entry count and 4xx/5xx breakdown.
+    """
+    total = 0
+    errors_4xx = []
+    errors_5xx = []
+    try:
+        with open(filepath, 'r', errors='ignore', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                total += 1
+                status = row.get('Status', '').strip().strip('"')
+                resource = row.get('Resource', '').strip()
+                try:
+                    code = int(status)
+                    if 400 <= code < 500:
+                        errors_4xx.append({'status': code, 'resource': resource})
+                    elif code >= 500:
+                        errors_5xx.append({'status': code, 'resource': resource})
+                except ValueError:
+                    pass
+    except (IOError, OSError):
+        pass
+    return {'entries': total, 'errors_4xx': errors_4xx, 'errors_5xx': errors_5xx}
 
 
 def dedup_errors(errors: list[dict]) -> list[dict]:
@@ -266,25 +331,40 @@ def main():
         'unique': len(set(e['message'][:120] for e in php_debug_errors)),
     }
 
-    # --- Source 4: PHP error log ---
-    php_error_log = base / 'logs' / 'php-error.log'
-    php_log_errors = parse_php_error_log(str(php_error_log)) if php_error_log.exists() else []
+    # --- Source 4: PHP error log (text or CSV) ---
+    php_error_log_txt = base / 'logs' / 'php-error.log'
+    php_error_log_csv = base / 'wp-content' / 'logs' / 'php-error-logs.csv'
+    php_log_errors: list[dict] = []
+    if php_error_log_txt.exists():
+        php_log_errors = parse_php_error_log(str(php_error_log_txt))
+    if php_error_log_csv.exists():
+        php_log_errors += parse_php_error_csv(str(php_error_log_csv))
     summary['sources']['php_error_log'] = {
-        'files': 1 if php_error_log.exists() else 0,
+        'files': sum([php_error_log_txt.exists(), php_error_log_csv.exists()]),
         'errors': len(php_log_errors),
     }
 
-    # --- Source 5: Access log ---
-    access_log = base / 'logs' / 'access.log'
+    # --- Source 5: Access log (text or CSV) ---
+    access_log_txt = base / 'logs' / 'access.log'
+    access_log_csv = base / 'wp-content' / 'logs' / 'access-logs.csv'
     access_entries = 0
+    access_4xx: list[dict] = []
+    access_5xx: list[dict] = []
     try:
-        with open(access_log, 'r', errors='ignore') as f:
+        with open(access_log_txt, 'r', errors='ignore') as f:
             access_entries = sum(1 for _ in f)
     except (IOError, OSError):
         pass
+    if access_log_csv.exists():
+        csv_access = parse_access_csv(str(access_log_csv))
+        access_entries += csv_access['entries']
+        access_4xx = csv_access['errors_4xx']
+        access_5xx = csv_access['errors_5xx']
     summary['sources']['access_log'] = {
-        'files': 1 if access_entries > 0 else 0,
+        'files': sum([access_entries > 0, access_log_csv.exists()]),
         'entries': access_entries,
+        'errors_4xx': len(access_4xx),
+        'errors_5xx': len(access_5xx),
     }
 
     # --- Deduplicate and rank errors ---
@@ -342,7 +422,9 @@ def main():
     print(f"QM JSON files: {len(qm_data_list)} parsed")
     print(f"PHP errors:    {len(all_php_errors)} total, {len(deduped_php)} unique")
     print(f"JS errors:     {summary['sources']['js_errors']['total_errors']} total on {len(js_data)} URLs")
-    print(f"Access log:    {access_entries} entries")
+    access_4xx_count = len(access_4xx) if access_log_csv.exists() else 0
+    access_5xx_count = len(access_5xx) if access_log_csv.exists() else 0
+    print(f"Access log:    {access_entries} entries ({access_4xx_count} 4xx, {access_5xx_count} 5xx)")
     print(f"\nURLs: {red_count} RED | {amber_count} AMBER | {green_count} GREEN")
     print(f"\nWritten to: {output_path}")
     print(f"{'='*60}\n")

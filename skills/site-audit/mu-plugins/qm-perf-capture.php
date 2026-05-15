@@ -9,6 +9,17 @@ defined('ABSPATH') || exit;
 
 $GLOBALS['qm_audit_start'] = microtime(true);
 
+// Grant 'view_query_monitor' cap when qm_auth cookie present.
+// Prevents QM from firing qm/cease (which wipes $wpdb->queries after every query).
+if (!empty($_COOKIE['qm_auth'])) {
+    add_filter('user_has_cap', function ($allcaps, $caps) {
+        if (in_array('view_query_monitor', $caps, true)) {
+            $allcaps['view_query_monitor'] = true;
+        }
+        return $allcaps;
+    }, 10, 2);
+}
+
 // Collect PHP errors for QM audit
 $GLOBALS['_qm_audit_errors'] = [];
 
@@ -43,8 +54,10 @@ set_error_handler(function ($errno, $errstr, $errfile, $errline) {
 });
 
 function qm_perf_capture_shutdown() {
-    $cookie_name = defined('QM_COOKIE') ? QM_COOKIE : 'qm_auth';
-    if (empty($_COOKIE[$cookie_name])) {
+    // Check 'qm_auth' first (audit crawl override), then fall back to QM_COOKIE constant
+    $authorized = !empty($_COOKIE['qm_auth'])
+        || (!empty($_COOKIE[defined('QM_COOKIE') ? QM_COOKIE : '']));
+    if (!$authorized) {
         return;
     }
 

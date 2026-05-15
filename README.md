@@ -149,9 +149,8 @@ QM JSON files are the primary data source. Without them you get PHP/JS errors bu
 
 ## Where skills live
 
-- `skills/` at project root — auto-discovered by Claude. Commit to git for team sharing. ✅
-- `.claude/skills/` — also works, for personal/local skills only
-- `~/.claude/skills/` — global across all projects, not for team use
+- `.claude/skills/` — project-level skills, auto-discovered by Claude at session start
+- `~/.claude/skills/` — global across all projects
 
 ## Team review workflow
 
